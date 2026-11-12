@@ -1,0 +1,51 @@
+plugins {
+    id 'com.android.application'
+}
+
+def buildNo = Integer.parseInt(System.getenv('VERSION_CODE') ?: '1')
+
+android {
+    namespace 'io.github.maxioo21.odkrywaj'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'io.github.maxioo21.odkrywaj'
+        minSdk 24
+        targetSdk 34
+        versionCode buildNo
+        versionName "1.0.${buildNo}"
+    }
+
+    signingConfigs {
+        release {
+            // Klucz NIE jest w repozytorium – podaje go GitHub Actions przez zmienne środowiskowe
+            storeFile file(System.getenv('SIGNING_STORE_FILE') ?: 'missing.keystore')
+            storePassword System.getenv('SIGNING_STORE_PASSWORD') ?: ''
+            keyAlias 'odkrywaj'
+            keyPassword System.getenv('SIGNING_STORE_PASSWORD') ?: ''
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // Strona aplikacji z folderu /odkrywaj trafia do środka APK
+    sourceSets {
+        main {
+            assets.srcDirs = ['../../odkrywaj']
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'
+}

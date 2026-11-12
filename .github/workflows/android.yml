@@ -1,0 +1,77 @@
+name: Zbuduj aplikację Android (APK)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'odkrywaj/**'
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      # Klucz podpisu: z sekretów repozytorium (jeśli dodane), inaczej trzymany w prywatnej
+      # pamięci podręcznej GitHub Actions – nigdy nie trafia do publicznego kodu.
+      - name: Pamięć klucza podpisu
+        uses: actions/cache@v4
+        with:
+          path: ~/.odk-signing
+          key: odkrywaj-signing-v1
+
+      - name: Przygotuj klucz podpisu
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          mkdir -p ~/.odk-signing
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > ~/.odk-signing/release.jks
+            printf '%s' "$KEYSTORE_PASSWORD" > ~/.odk-signing/pass
+          elif [ ! -f ~/.odk-signing/release.jks ]; then
+            openssl rand -hex 24 > ~/.odk-signing/pass
+            keytool -genkeypair -keystore ~/.odk-signing/release.jks -alias odkrywaj -keyalg RSA -keysize 2048 \
+              -validity 10000 -storepass "$(cat ~/.odk-signing/pass)" -keypass "$(cat ~/.odk-signing/pass)" \
+              -dname "CN=Odkrywaj, O=maxioo21, C=PL"
+          fi
+          echo "::add-mask::$(cat ~/.odk-signing/pass)"
+          echo "SIGNING_STORE_FILE=$HOME/.odk-signing/release.jks" >> "$GITHUB_ENV"
+          echo "SIGNING_STORE_PASSWORD=$(cat ~/.odk-signing/pass)" >> "$GITHUB_ENV"
+
+      - name: Budowanie APK
+        working-directory: android
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Przygotuj plik
+        run: cp android/app/build/outputs/apk/release/app-release.apk Odkrywaj.apk
+
+      - name: Opublikuj do pobrania
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Odkrywaj 1.0.${{ github.run_number }}
+          make_latest: true
+          files: Odkrywaj.apk
+          body: |
+            📲 Pobierz **Odkrywaj.apk** poniżej i otwórz na telefonie z Androidem.
+            Jeśli telefon zapyta – zezwól na instalację z tego źródła (przeglądarka / Pliki).

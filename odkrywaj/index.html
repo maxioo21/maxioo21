@@ -1056,6 +1056,17 @@ $('#openSettings').onclick = () => { $('#gkey').value = S.gKey; $('#setModal').h
 $('#saveKey').onclick = () => { S.gKey = $('#gkey').value.trim(); store.set('gkey', S.gKey); gReady = null; $('#setModal').hidden = true; toast(S.gKey ? 'Zapisano klucz Google — zdjęcia i ceny pojawią się w szczegółach miejsc.' : 'Zapisano.'); };
 $('#clearKey').onclick = () => { S.gKey = ''; store.set('gkey', ''); $('#gkey').value = ''; toast('Usunięto klucz.'); };
 
+/* ---------- przycisk „Wstecz” (aplikacja Android) ---------- */
+window.__odkBack = () => {
+  const open = [...document.querySelectorAll('.modal')].find(m => !m.hidden);
+  if (open) { open.hidden = true; return true; }
+  if (S.nav) { stopNav(); return true; }
+  if (S.route && S.sel) { const p = S.sel; clearRoute(); openPlace(p); return true; }
+  if ($('#backList')) { $('#backList').click(); return true; }
+  if (S.sheet !== 'peek') { setSheet('peek'); return true; }
+  return false;
+};
+
 /* ---------- start ---------- */
 measureTop(); setSheet('peek'); setPill();
 try { const h = decodeURIComponent(location.hash.slice(1)); if (h && h.length < 40) { S.query = h; $('#q').value = h; } } catch {}
@@ -1064,7 +1075,7 @@ $('#sheetBody').innerHTML = '<div class="empty">📍 Szukam Twojej lokalizacji�
 if (S.city) flyCity();
 startWatch();
 setTimeout(() => { if (!S.firstFix && !S.city) openCity(); }, 7000);
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && location.protocol === 'https:' && location.hostname !== 'appassets.androidplatform.net') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
 </script>
 </body>
