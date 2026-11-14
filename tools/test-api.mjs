@@ -1,30 +1,37 @@
-// Diagnostyka: czy serwery map/wyszukiwania odpowiadają dla aplikacji (WebView Android)
 const ORIGIN = 'https://appassets.androidplatform.net';
-const UA = 'Mozilla/5.0 (Linux; Android 14; 23078PND5G Build/UKQ1.230804.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/130.0.6723.107 Mobile Safari/537.36';
-const Q = '[out:json][timeout:25];(nwr["amenity"~"^(restaurant|fast_food|food_court|cafe)$"](around:1800,50.2863,19.1041););out center 250;';
-const OVERPASS = ['https://overpass-api.de/api/interpreter','https://overpass.private.coffee/api/interpreter','https://maps.mail.ru/osm/tools/overpass/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.osm.jp/api/interpreter'];
-async function t(name, url, opt = {}) {
+const UA = 'Mozilla/5.0 (Linux; Android 14; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/130.0 Mobile Safari/537.36';
+const LAT = 50.2863, LON = 19.1041;
+async function t(name, url, opt = {}, show) {
   const t0 = Date.now();
   try {
-    const c = new AbortController(); const to = setTimeout(() => c.abort(), 30000);
+    const c = new AbortController(); const to = setTimeout(() => c.abort(), 15000);
     const r = await fetch(url, { ...opt, signal: c.signal, headers: { 'User-Agent': UA, Origin: ORIGIN, Referer: ORIGIN + '/', ...(opt.headers || {}) } });
     const body = await r.text(); clearTimeout(to);
     let extra = '';
-    try { const j = JSON.parse(body); if (j.elements) extra = `elements=${j.elements.length}${j.remark ? ' remark=' + j.remark.slice(0, 80) : ''}`; else if (Array.isArray(j)) extra = `items=${j.length}`; else if (j.code) extra = 'code=' + j.code; else if (j.version) extra = 'style v' + j.version; } catch { extra = 'body: ' + body.slice(0, 120).replace(/\s+/g, ' '); }
-    console.log(`${r.ok ? 'OK ' : 'ERR'} ${r.status} ${String(Date.now() - t0).padStart(6)}ms  ACAO=${r.headers.get('access-control-allow-origin')}  ${name}  ${extra}`);
-  } catch (e) { console.log(`ERR ---- ${String(Date.now() - t0).padStart(6)}ms  ${name}  ${e.name}: ${e.message}`); }
+    try { const j = JSON.parse(body);
+      if (j.elements) extra = `elements=${j.elements.length} ${j.remark || ''}`;
+      else if (j.features) extra = `features=${j.features.length} :: ` + j.features.slice(0, 6).map(f => `${f.properties.name}[${f.properties.osm_key}=${f.properties.osm_value}]`).join(' | ');
+      else if (Array.isArray(j)) extra = `items=${j.length} :: ` + j.slice(0, 5).map(x => `${x.name}[${x.category}=${x.type}]${x.extratags ? ' xt:' + Object.keys(x.extratags).slice(0,4).join(',') : ''}`).join(' | ');
+      else extra = body.slice(0, 150);
+    } catch { extra = 'body: ' + body.slice(0, 150).replace(/\s+/g, ' '); }
+    console.log(`${r.ok ? 'OK ' : 'ERR'} ${r.status} ${String(Date.now() - t0).padStart(6)}ms ACAO=${r.headers.get('access-control-allow-origin')} | ${name} | ${extra}`);
+  } catch (e) { console.log(`ERR ---- ${String(Date.now() - t0).padStart(6)}ms | ${name} | ${e.name}: ${e.message}`); }
 }
-for (const u of OVERPASS) await t('overpass ' + new URL(u).host, u, { method: 'POST', body: 'data=' + encodeURIComponent(Q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-for (const u of OVERPASS.slice(0, 3)) await t('overpass GET ' + new URL(u).host, u + '?data=' + encodeURIComponent(Q));
-await t('nominatim reverse', 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=50.2863&lon=19.1041&zoom=10&accept-language=pl');
-await t('nominatim search', 'https://nominatim.openstreetmap.org/search?format=jsonv2&q=Sosnowiec&countrycodes=pl&featureType=settlement&limit=5&accept-language=pl');
-await t('osrm foot', 'https://routing.openstreetmap.de/routed-foot/route/v1/driving/19.1041,50.2863;19.12,50.29?overview=full&geometries=geojson&steps=true');
-await t('osrm car', 'https://routing.openstreetmap.de/routed-car/route/v1/driving/19.1041,50.2863;19.12,50.29?overview=false');
-await t('openfreemap style liberty', 'https://tiles.openfreemap.org/styles/liberty');
-await t('openfreemap style bright', 'https://tiles.openfreemap.org/styles/bright');
-await t('osm raster tile', 'https://tile.openstreetmap.org/14/9060/5552.png');
-await t('carto tile', 'https://a.basemaps.cartocdn.com/rastertiles/voyager/14/9060/5552.png');
-await t('wikidata', 'https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q190077&props=sitelinks&sitefilter=plwiki&format=json&origin=*');
-await t('wikipedia summary', 'https://pl.wikipedia.org/api/rest_v1/page/summary/Sosnowiec');
-await t('unpkg maplibre 4', 'https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js');
-await t('unpkg maplibre-leaflet', 'https://unpkg.com/@maplibre/maplibre-gl-leaflet/leaflet-maplibre-gl.js');
+const tiny = '[out:json][timeout:10];node(around:300,50.2863,19.1041)["amenity"="restaurant"];out 5;';
+for (const u of ['https://overpass-api.de/api/status', 'https://overpass.private.coffee/api/status', 'https://overpass.kumi.systems/api/status']) await t('status ' + new URL(u).host, u);
+for (const u of ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'])
+  await t('tiny ' + new URL(u).host, u + '?data=' + encodeURIComponent(tiny));
+const vb = `${LON - 0.025},${LAT + 0.016},${LON + 0.025},${LAT - 0.016}`;
+await t('nominatim [restaurant] viewbox', `https://nominatim.openstreetmap.org/search?format=jsonv2&q=restaurant&viewbox=${vb}&bounded=1&limit=40&extratags=1&addressdetails=1`);
+await new Promise(r => setTimeout(r, 1100));
+await t('nominatim amenity=restaurant (structured)', `https://nominatim.openstreetmap.org/search?format=jsonv2&amenity=restaurant&viewbox=${vb}&bounded=1&limit=40&extratags=1`);
+await new Promise(r => setTimeout(r, 1100));
+await t('nominatim q=[amenity=fast_food]', `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent('[amenity=fast_food]')}&viewbox=${vb}&bounded=1&limit=40&extratags=1`);
+await new Promise(r => setTimeout(r, 1100));
+await t('nominatim kebab', `https://nominatim.openstreetmap.org/search?format=jsonv2&q=kebab&viewbox=${vb}&bounded=1&limit=40&extratags=1`);
+await new Promise(r => setTimeout(r, 1100));
+await t('nominatim basen (swimming pool)', `https://nominatim.openstreetmap.org/search?format=jsonv2&q=swimming+pool&viewbox=${LON-0.08},${LAT+0.05},${LON+0.08},${LAT-0.05}&bounded=1&limit=40&extratags=1`);
+await t('photon reverse radius osm_tag', `https://photon.komoot.io/reverse?lat=${LAT}&lon=${LON}&radius=2&limit=50&osm_tag=amenity:restaurant`);
+await t('photon api q=restaurant osm_tag', `https://photon.komoot.io/api/?q=restaurant&lat=${LAT}&lon=${LON}&limit=50&osm_tag=amenity:restaurant&bbox=${LON-0.025},${LAT-0.016},${LON+0.025},${LAT+0.016}`);
+await t('photon api q=kebab', `https://photon.komoot.io/api/?q=kebab&lat=${LAT}&lon=${LON}&limit=30&bbox=${LON-0.03},${LAT-0.02},${LON+0.03},${LAT+0.02}`);
+await t('photon api q=museum osm_tag', `https://photon.komoot.io/api/?q=museum&lat=${LAT}&lon=${LON}&limit=30&osm_tag=tourism:museum`);
