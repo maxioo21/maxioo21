@@ -1,0 +1,18 @@
+name: Test serwerów (diagnostyka)
+on:
+  push:
+    branches: [main]
+    paths: ['tools/test-api.mjs', '.github/workflows/test-api.yml']
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - run: node tools/test-api.mjs
+      - run: |
+          for p in maplibre-gl@4 @maplibre/maplibre-gl-leaflet leaflet@1.9.4; do npm view "$p" version name | tail -2; done
+          cd /tmp && npm pack @maplibre/maplibre-gl-leaflet --silent && tar -tzf maplibre-maplibre-gl-leaflet-*.tgz | head -20
