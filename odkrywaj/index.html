@@ -422,7 +422,12 @@ const CAT = {
   railway:{station:['🚆','Dworzec kolejowy','service']},
 };
 const SPORT = {swimming:['🏊','Pływalnia','water'],climbing:['🧗','Wspinaczka','fun'],karting:['🏎️','Gokarty','fun'],billiards:['🎱','Bilard','fun'],tennis:['🎾','Tenis','fun'],padel:['🎾','Padel','fun'],squash:['🎾','Squash','fun'],paintball:['🔫','Paintball','fun'],laser_tag:['🔦','Laser tag','fun']};
+const CUIS_ICON = [[/kebab|doner|shawarma|gyros/, '🥙', 'Kebab'], [/pizza/, '🍕', 'Pizzeria'], [/sushi|japanese|ramen/, '🍣', null], [/burger/, '🍔', null], [/chicken|wings/, '🍗', null], [/chinese|asian|vietnamese|thai|noodle/, '🍜', null], [/ice_cream/, '🍦', null], [/coffee/, '☕', null], [/donut|cake|dessert|crepe|pancake/, '🍰', null], [/dumpling|pierogi|polish|regional/, '🥟', null], [/indian|curry/, '🍛', null], [/mexican|taco|burrito/, '🌮', null], [/italian|pasta/, '🍝', null], [/fish|seafood/, '🐟', null], [/sandwich|bagel/, '🥪', null]];
 function classify(t) {
+  if (t.cuisine && /^(restaurant|fast_food|food_court|cafe)$/.test(t.amenity || '')) {
+    const c = t.cuisine.toLowerCase(); const base = CAT.amenity[t.amenity];
+    for (const [re, e, l] of CUIS_ICON) if (re.test(c)) return { e, l: l && t.amenity === 'fast_food' ? l : base[1], g: 'food', c: GC.food };
+  }
   if (t.sport) { const sp = t.sport.split(';')[0]; if (SPORT[sp] && (!t.leisure || t.leisure === 'sports_centre' || t.leisure === 'track')) return mk(SPORT[sp]); }
   for (const k of ['amenity','tourism','historic','leisure','natural','shop','railway']) {
     const v = t[k]; if (v && CAT[k][v]) return mk(CAT[k][v]);
