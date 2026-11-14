@@ -440,7 +440,7 @@ const CAT = {
   railway:{station:['🚆','Dworzec kolejowy','service']},
 };
 const SPORT = {swimming:['🏊','Pływalnia','water'],climbing:['🧗','Wspinaczka','fun'],karting:['🏎️','Gokarty','fun'],billiards:['🎱','Bilard','fun'],tennis:['🎾','Tenis','fun'],padel:['🎾','Padel','fun'],squash:['🎾','Squash','fun'],paintball:['🔫','Paintball','fun'],laser_tag:['🔦','Laser tag','fun']};
-const CUIS_ICON = [[/kebab|doner|shawarma|gyros/, '🥙', 'Kebab'], [/pizza/, '🍕', 'Pizzeria'], [/sushi|japanese|ramen/, '🍣', null], [/burger/, '🍔', null], [/chicken|wings/, '🍗', null], [/chinese|asian|vietnamese|thai|noodle/, '🍜', null], [/ice_cream/, '🍦', null], [/coffee/, '☕', null], [/donut|cake|dessert|crepe|pancake/, '🍰', null], [/dumpling|pierogi|polish|regional/, '🥟', null], [/indian|curry/, '🍛', null], [/mexican|taco|burrito/, '🌮', null], [/italian|pasta/, '🍝', null], [/fish|seafood/, '🐟', null], [/sandwich|bagel/, '🥪', null]];
+const CUIS_ICON = [[/kebab|doner|shawarma|gyros|turkish|arab|lebanese|middle_eastern|falafel/, '🥙', 'Kebab'], [/pizza/, '🍕', 'Pizzeria'], [/sushi|japanese|ramen/, '🍣', null], [/burger/, '🍔', null], [/chicken|wings/, '🍗', null], [/chinese|asian|vietnamese|thai|noodle/, '🍜', null], [/ice_cream/, '🍦', null], [/coffee/, '☕', null], [/donut|cake|dessert|crepe|pancake/, '🍰', null], [/dumpling|pierogi|polish|regional/, '🥟', null], [/indian|curry/, '🍛', null], [/mexican|taco|burrito/, '🌮', null], [/italian|pasta/, '🍝', null], [/fish|seafood/, '🐟', null], [/sandwich|bagel/, '🥪', null]];
 function classify(t) {
   if (t.cuisine && /^(restaurant|fast_food|food_court|cafe)$/.test(t.amenity || '')) {
     const c = t.cuisine.toLowerCase(); const base = CAT.amenity[t.amenity];
@@ -737,9 +737,10 @@ function planTrip(cands, foods, o) {
       if (used.has(c.id) || names.has(c.name) || (!foodTurn && o.avoid && o.avoid.has(c.id))) continue;
       if (foodTurn && c.kind === 'ice_cream' && mealTime) continue;
       const tr = travel(cur, c); if (tr + c.dur > left) continue;
+      if (!foodTurn && o.mode !== 'car' && tr > Math.max(14, c.dur * 1.1) && c.pop < .6) continue;
       const price = (c.lo + c.hi) / 2 * P; if (lo + (c.lo + c.hi) / 2 * P > o.budget + .01) continue;
       const j = rnd ? (Math.sin((c.lat * 1e4 + c.lng * 1e3) * rnd) + 1) * .35 : 0;
-      const v = (foodTurn ? 1 + c.pop * .5 : tw(c) * (1 + c.pop)) + j - tr / (o.mode === 'car' ? 40 : 22) - (o.cheap ? price / 15 : price / 400) - (c.dur > left * .7 && stops.length === 0 ? .3 : 0);
+      const v = (foodTurn ? 1 + c.pop * .5 : tw(c) * (1 + c.pop)) + j - tr / (o.mode === 'car' ? 40 : 22) - tr / (c.dur + 20) * .6 - (o.cheap ? price / 15 : price / 400) - (c.dur > left * .7 && stops.length === 0 ? .3 : 0);
       if (v > bv) { bv = v; best = { c, tr }; }
     }
     if (!best) { if (mealTime) { mealsDone++; continue; } break; }
@@ -1235,7 +1236,8 @@ function getPosOnce() {
   return new Promise((res, rej) => {
     if (S.user && Date.now() - S.user.t < 30000) return res(S.user);
     if (!navigator.geolocation) return rej(new Error('nogeo'));
-    navigator.geolocation.getCurrentPosition(pos => { onPos(pos); res(S.user); }, rej, { enableHighAccuracy: true, timeout: 12000, maximumAge: 10000 });
+    const last = S.user && Date.now() - S.user.t < 15 * 60e3 ? S.user : null;
+    navigator.geolocation.getCurrentPosition(pos => { onPos(pos); res(S.user); }, err => last ? res(last) : rej(err), { enableHighAccuracy: true, timeout: last ? 4000 : 12000, maximumAge: 30000 });
   });
 }
 async function planRoute(p, keepNav) {
@@ -1352,8 +1354,9 @@ async function onFirstFix() {
   map.setView([S.user.lat, S.user.lng], 15);
   search(S.query || 'atrakcje', { around: true });
   try {
-    const j = await getJSON(`${PHOTON}/reverse?lat=${S.user.lat.toFixed(5)}&lon=${S.user.lng.toFixed(5)}&limit=1&osm_tag=place`, {}, 8000);
-    const pr = j.features?.[0]?.properties || {}; const a = { country_code: (pr.countrycode || '').toLowerCase() }; const name = pr.city || (/city|town|village/.test(pr.osm_value) ? pr.name : '') || pr.county || '';
+    const j = await getJSON(`${PHOTON}/reverse?lat=${S.user.lat.toFixed(5)}&lon=${S.user.lng.toFixed(5)}&limit=1&radius=25&osm_tag=place:city&osm_tag=place:town&osm_tag=place:village`, {}, 8000).catch(() => ({}));
+    const pr = j.features?.[0]?.properties || {}; const a = { country_code: (pr.countrycode || '').toLowerCase() }; let name = pr.name || pr.city || '';
+    if (!name) { try { const n = await nomJSON(`${NOM}/reverse?format=jsonv2&lat=${S.user.lat}&lon=${S.user.lng}&zoom=10&accept-language=pl&addressdetails=1`); const ad = n.address || {}; name = ad.city || ad.town || ad.village || ad.municipality || ''; a.country_code = a.country_code || ad.country_code || ''; } catch {} }
     if (a.country_code) { S.country = a.country_code; store.set('country', S.country); }
     S.city = { name, lat: S.user.lat, lng: S.user.lng, fixed: false }; store.set('city', S.city); setPill();
   } catch {}
@@ -1510,7 +1513,8 @@ async function makePlans() {
     const TT = { mix: '✨ Najciekawsze miejsca', kultura: '🏛️ Zabytki i muzea', natura: '🌳 Natura i spacer', rozrywka: '🎢 Rozrywka', jedzenie: '🍽️ Smaki okolicy' };
     const sig = new Set();
     plans = [{ ...p1, title: TT[PL.theme] }, { ...p2, title: PL.budget ? '💸 Oszczędnie' : '🆓 Za darmo – inna trasa' }, { ...p3, title: TT[alt] + (alt === PL.theme ? '' : ' – inny pomysł') }]
-      .filter(pl => { const k = pl.stops.map(x => x.id).join(); if (!pl.stops.length || sig.has(k)) return false; sig.add(k); return true; });
+      .filter(pl => { const k = pl.stops.map(x => x.id).join(); if (!pl.stops.length || sig.has(k)) return false; sig.add(k); return true; })
+      .filter((pl, i, arr) => i === 0 || pl.stops.length >= 2 || PL.h < 2 || arr.length === 1);
     plans.start = start; renderPlans();
   } catch (e) {
     if (e.name === 'AbortError') return;
