@@ -133,6 +133,24 @@ a{color:var(--brand)}
 body.navigating .top,body.navigating .sheet,body.navigating .area-btn,body.navigating .install{display:none}
 body.navigating .fabs{bottom:calc(96px + var(--safe-b))}
 
+.pl label{display:block;font-size:12.5px;font-weight:750;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:16px 0 8px}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button{border:0;background:#f2f1ee;border-radius:12px;padding:10px 13px;font-weight:700;font-size:14px}
+.seg button.on{background:var(--ink);color:#fff}
+.pl-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.pl-row input{flex:1;font:inherit;font-size:18px;font-weight:700;padding:11px 13px;border-radius:13px;border:1.5px solid var(--line);background:#fafaf8;outline:0;min-width:0}
+.stepper{display:inline-flex;align-items:center;gap:14px;background:#f2f1ee;border-radius:14px;padding:4px}
+.stepper button{width:42px;height:42px;border:0;border-radius:11px;background:#fff;font-size:22px;font-weight:700}
+.stepper b{min-width:22px;text-align:center;font-size:18px}
+.plan{border:1px solid var(--line);border-radius:20px;padding:14px 14px 4px;margin-bottom:12px;background:#fff}
+.plan-h{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
+.plan-h b{font-size:17px;font-weight:800}.plan-h span{color:var(--brand);font-weight:750;font-size:14px}
+.tl{list-style:none;margin:0;padding:0}
+.tl li{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line);cursor:pointer}
+.tl .tm{flex:none;width:44px;font-weight:800;font-size:13.5px;color:var(--nav);padding-top:8px}
+.tl .ic{flex:none;width:36px;height:36px;border-radius:11px;background:color-mix(in srgb,var(--c) 18%,#fff);display:grid;place-items:center;font-size:19px}
+.tl b{display:block;font-size:14.5px;line-height:1.3}.tl small{color:var(--muted);font-size:12.5px;line-height:1.45}
+.pin.num span{color:#fff;font-weight:800;font-size:15px}
 /* markers */
 .pin{width:34px;height:34px;border-radius:50% 50% 50% 4px;transform:rotate(-45deg);background:var(--c);border:2.5px solid #fff;box-shadow:0 3px 10px rgba(0,0,0,.3);display:grid;place-items:center}
 .pin span{transform:rotate(45deg);font-size:16px;line-height:1}
@@ -617,7 +635,123 @@ function keepItem(it, parsed) {
   return parsed.rules.some(r => r.sel.some(sel => matchSel(sel, it.tags)));
 }
 
-if (typeof module !== 'undefined') module.exports = { selParts, matchSel, photonTags, nameTerms, photonToItem, nominatimMerge, keepItem, parseQuery, buildOverpass, classify, offers, priceInfo, hoursTxt, genDesc, stepText, fmtDist, fmtTime, dist, distToLine, looseRe, RULES };
+/* ---- kafelki mapy OpenFreeMap (schemat OpenMapTiles): komplet miejsc w obszarze ---- */
+function mvtDecode(buf, tx, ty, z, want = 'poi') {
+  const b = buf instanceof Uint8Array ? buf : new Uint8Array(buf); let pos = 0; const out = [];
+  const td = new TextDecoder();
+  const varint = () => { let r = 0, m = 1, c; do { c = b[pos++]; r += (c & 0x7f) * m; m *= 128; } while (c & 0x80); return r; };
+  const skip = w => { if (w === 0) varint(); else if (w === 1) pos += 8; else if (w === 2) { const l = varint(); pos += l; } else if (w === 5) pos += 4; else pos = b.length; };
+  const zz = n => (n % 2 ? -(n + 1) / 2 : n / 2);
+  const layer = end => {
+    let name = '', extent = 4096; const keys = [], vals = [], feats = [];
+    while (pos < end) {
+      const tag = varint(), f = tag >> 3, w = tag & 7;
+      if (f === 1 && w === 2) { const l = varint(); name = td.decode(b.subarray(pos, pos + l)); pos += l; if (name !== want) return; }
+      else if (f === 2 && w === 2) { const l = varint(); feats.push([pos, pos + l]); pos += l; }
+      else if (f === 3 && w === 2) { const l = varint(); keys.push(td.decode(b.subarray(pos, pos + l))); pos += l; }
+      else if (f === 4 && w === 2) {
+        const l = varint(), e = pos + l; let v = null;
+        while (pos < e) {
+          const t = varint(), ff = t >> 3, ww = t & 7;
+          if (ff === 1) { const sl = varint(); v = td.decode(b.subarray(pos, pos + sl)); pos += sl; }
+          else if (ff === 2) { v = new DataView(b.buffer, b.byteOffset + pos, 4).getFloat32(0, true); pos += 4; }
+          else if (ff === 3) { v = new DataView(b.buffer, b.byteOffset + pos, 8).getFloat64(0, true); pos += 8; }
+          else if (ff === 4 || ff === 5) v = varint();
+          else if (ff === 6) v = zz(varint());
+          else if (ff === 7) v = !!varint();
+          else skip(ww);
+        }
+        vals.push(v); pos = e;
+      }
+      else if (f === 5 && w === 0) extent = varint();
+      else skip(w);
+    }
+    if (name !== want) return;
+    const n = 2 ** z;
+    for (const [s0, e0] of feats) {
+      pos = s0; let id = 0; const tags = []; let g0 = -1, gx = 0, gy = 0;
+      while (pos < e0) {
+        const t = varint(), ff = t >> 3, ww = t & 7;
+        if (ff === 1 && ww === 0) id = varint();
+        else if (ff === 2 && ww === 2) { const l = varint(), e = pos + l; while (pos < e) tags.push(varint()); }
+        else if (ff === 4 && ww === 2) { const l = varint(), e = pos + l; if (pos < e) { g0 = varint(); if (pos < e) gx = zz(varint()); if (pos < e) gy = zz(varint()); } pos = e; }
+        else skip(ww);
+      }
+      if ((g0 & 7) !== 1) continue;
+      const pr = {}; for (let i = 0; i + 1 < tags.length; i += 2) pr[keys[tags[i]]] = vals[tags[i + 1]];
+      const X = (tx + gx / extent) / n, Y = (ty + gy / extent) / n;
+      out.push({ id, lng: X * 360 - 180, lat: Math.atan(Math.sinh(Math.PI * (1 - 2 * Y))) * 180 / Math.PI, p: pr });
+    }
+  };
+  while (pos < b.length) { const tag = varint(), f = tag >> 3, w = tag & 7; if (f === 3 && w === 2) { const l = varint(), end = pos + l; layer(end); pos = end; } else skip(w); }
+  return out;
+}
+const VAL2KEY = {};
+for (const k of ['amenity', 'tourism', 'leisure', 'historic', 'natural', 'railway', 'shop']) for (const v in CAT[k] || {}) if (!VAL2KEY[v]) VAL2KEY[v] = k;
+Object.assign(VAL2KEY, { sports_centre: 'leisure', water_park: 'leisure', swimming_pool: 'leisure', bowling_alley: 'leisure', castle: 'historic', monument: 'historic', memorial: 'historic', attraction: 'tourism', museum: 'tourism', viewpoint: 'tourism', zoo: 'tourism', theme_park: 'tourism' });
+const SHOPISH = /shop|grocery|clothing|store|furniture|alcohol|jewelry|butcher|florist|hardware|mobile|optician|beauty|music|toys|sports|garden_centre|pet|shoes|deli|department|electronics|gift|books|stationery|cosmetics|perfumery|chemist|car$|bicycle$|kiosk|newsagent|tobacco|wine|tea|coffee|seafood|greengrocer|variety|houseware|interior|bag|outdoor|second_hand|charity|copyshop|photo|computer|doityourself/;
+function tileItem(f) {
+  const pr = f.p, sub = pr.subclass || pr.class; if (!sub) return null;
+  const key = VAL2KEY[sub] || (SHOPISH.test(pr.class || '') || SHOPISH.test(sub) ? 'shop' : 'amenity');
+  const type = { 1: 'node', 2: 'way', 3: 'relation' }[f.id % 10]; if (!type) return null;
+  const t = { [key]: sub }; const nm = pr['name:pl'] || pr.name; if (nm) t.name = nm;
+  return { id: type + '/' + Math.floor(f.id / 10), lat: f.lat, lng: f.lng, tags: t, rank: pr.rank };
+}
+function tilesFor(bb, z) {
+  const n = 2 ** z, X = lng => Math.floor((lng + 180) / 360 * n), Y = lat => { const r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n); };
+  const out = []; for (let x = X(bb[0]); x <= X(bb[2]); x++) for (let y = Y(bb[3]); y <= Y(bb[1]); y++) out.push([x, y]); return out;
+}
+
+/* ---- planer wycieczek: [czas min, koszt od, koszt do (zł/os.), klimat] ---- */
+const PLAN = { museum: [75, 15, 35, 'kultura'], gallery: [50, 0, 20, 'kultura'], arts_centre: [50, 0, 20, 'kultura'], castle: [60, 0, 40, 'kultura'], palace: [60, 0, 40, 'kultura'], manor: [40, 0, 20, 'kultura'], fort: [45, 0, 20, 'kultura'], ruins: [30, 0, 0, 'kultura'], city_gate: [15, 0, 0, 'kultura'], tower: [25, 0, 15, 'kultura'], monument: [10, 0, 0, 'kultura'], memorial: [10, 0, 0, 'kultura'], place_of_worship: [20, 0, 0, 'kultura'], church: [20, 0, 0, 'kultura'], monastery: [30, 0, 0, 'kultura'], archaeological_site: [30, 0, 0, 'kultura'], theatre: [150, 40, 90, 'kultura'], artwork: [10, 0, 0, 'kultura'], attraction: [35, 0, 15, 'mix'], fountain: [10, 0, 0, 'mix'], viewpoint: [20, 0, 0, 'natura'], park: [45, 0, 0, 'natura'], garden: [40, 0, 10, 'natura'], nature_reserve: [60, 0, 0, 'natura'], beach: [90, 0, 0, 'natura'], peak: [90, 0, 0, 'natura'], waterfall: [30, 0, 0, 'natura'], zoo: [150, 30, 50, 'rozrywka'], aquarium: [90, 30, 60, 'rozrywka'], theme_park: [180, 60, 150, 'rozrywka'], water_park: [150, 40, 80, 'rozrywka'], cinema: [130, 25, 35, 'rozrywka'], bowling_alley: [60, 25, 40, 'rozrywka'], escape_game: [60, 50, 70, 'rozrywka'], trampoline_park: [60, 30, 45, 'rozrywka'], amusement_arcade: [45, 20, 40, 'rozrywka'], miniature_golf: [45, 15, 25, 'rozrywka'], ice_rink: [60, 15, 25, 'rozrywka'] };
+const PLAN_FOOD = { restaurant: [60, 40, 70], fast_food: [30, 20, 35], cafe: [30, 15, 25], ice_cream: [15, 8, 15], food_court: [40, 25, 45] };
+function planInfo(t) {
+  for (const k of ['tourism', 'historic', 'leisure', 'natural', 'amenity']) {
+    const v = t[k]; if (!v) continue;
+    const food = k === 'amenity' && PLAN_FOOD[v]; const a = food || PLAN[v]; if (!a) continue;
+    let lo = a[1], hi = a[2];
+    if (t.fee === 'no') { lo = hi = 0; }
+    const ch = String(t.charge || t['charge:adult'] || '').match(/(\d+(?:[.,]\d+)?)/); if (ch) { lo = hi = Math.round(parseFloat(ch[1].replace(',', '.'))); }
+    return { kind: v, food: !!food, dur: a[0], lo, hi, theme: food ? 'jedzenie' : a[3] };
+  }
+  return null;
+}
+function planPop(t, rank) {
+  let p = 0; if (t.wikidata) p += .6; if (t.wikipedia) p += .3; if (t.tourism === 'attraction' || t.tourism === 'museum') p += .25;
+  if (t.heritage) p += .15; if (rank != null) p += Math.max(0, (20 - rank)) / 40; return Math.min(1.5, p);
+}
+function planTrip(cands, foods, o) {
+  const speed = o.mode === 'car' ? 330 : 75;
+  const travel = (a, b) => { const d = dist(a, b) * (o.mode === 'car' ? 1.4 : 1.25); return Math.max(1, Math.round(d / speed + (o.mode === 'car' && d > 800 ? 6 : 0))); };
+  const P = Math.max(1, o.persons || 1), rnd = o.seed || 0;
+  let t = 0, lo = 0, hi = 0, cur = o.start; const stops = [], used = new Set(), names = new Set();
+  const meals = o.minutes >= 420 ? 2 : o.minutes >= 150 ? 1 : 0; let mealsDone = 0;
+  const tw = c => o.theme === 'mix' || o.theme === 'jedzenie' ? 1 : c.theme === o.theme ? 2.4 : c.theme === 'mix' ? 1 : .45;
+  for (let g = 0; g < 24 && stops.length < 9; g++) {
+    const left = o.minutes - t;
+    const mealTime = mealsDone < meals && t >= o.minutes * (mealsDone === 0 ? (meals === 2 ? .3 : .38) : .68);
+    const foodTurn = mealTime || (o.theme === 'jedzenie' && stops.length % 2 === 1 && mealsDone < 3);
+    const pool = foodTurn ? foods : cands;
+    let best = null, bv = -Infinity;
+    for (const c of pool) {
+      if (used.has(c.id) || names.has(c.name) || (!foodTurn && o.avoid && o.avoid.has(c.id))) continue;
+      if (foodTurn && c.kind === 'ice_cream' && mealTime) continue;
+      const tr = travel(cur, c); if (tr + c.dur > left) continue;
+      const price = (c.lo + c.hi) / 2 * P; if (lo + (c.lo + c.hi) / 2 * P > o.budget + .01) continue;
+      const j = rnd ? (Math.sin((c.lat * 1e4 + c.lng * 1e3) * rnd) + 1) * .35 : 0;
+      const v = (foodTurn ? 1 + c.pop * .5 : tw(c) * (1 + c.pop)) + j - tr / (o.mode === 'car' ? 40 : 22) - (o.cheap ? price / 15 : price / 400) - (c.dur > left * .7 && stops.length === 0 ? .3 : 0);
+      if (v > bv) { bv = v; best = { c, tr }; }
+    }
+    if (!best) { if (mealTime) { mealsDone++; continue; } break; }
+    const { c, tr } = best;
+    stops.push({ ...c, travel: tr, at: t + tr });
+    t += tr + c.dur; lo += c.lo * P; hi += c.hi * P; used.add(c.id); names.add(c.name); cur = c;
+    if (foodTurn) mealsDone++;
+  }
+  return { stops, minutes: t, lo: Math.round(lo), hi: Math.round(hi) };
+}
+
+if (typeof module !== 'undefined') module.exports = { mvtDecode, tileItem, tilesFor, planInfo, planPop, planTrip, selParts, matchSel, photonTags, nameTerms, photonToItem, nominatimMerge, keepItem, parseQuery, buildOverpass, classify, offers, priceInfo, hoursTxt, genDesc, stepText, fmtDist, fmtTime, dist, distToLine, looseRe, RULES };
 </script>
 
 <!-- ======================= APLIKACJA ======================= -->
@@ -702,6 +836,35 @@ async function nomJSON(url, signal, ms = 8000) {
 const resCache = new Map();
 function bboxAround(c, r) { const dLat = r / 111320, dLng = r / (111320 * Math.cos(c.lat * Math.PI / 180)); return [c.lng - dLng, c.lat - dLat, c.lng + dLng, c.lat + dLat]; }
 
+/* kafelki mapy: szablon adresu + pamięć pobranych kafelków */
+let tileTpl = null; const tileMem = new Map();
+async function tileTemplate(signal) {
+  if (tileTpl) return tileTpl;
+  const c = store.get('tiletpl', null); if (c && Date.now() - c.t < 2 * 864e5) return (tileTpl = c.u);
+  const j = await getJSON('https://tiles.openfreemap.org/planet', { signal }, 8000);
+  tileTpl = j.tiles[0]; store.set('tiletpl', { t: Date.now(), u: tileTpl }); return tileTpl;
+}
+async function tilePois(bb, signal, retry = true) {
+  let z = 14, tiles = tilesFor(bb, z);
+  while (tiles.length > 16 && z > 12) { z--; tiles = tilesFor(bb, z); }
+  if (tiles.length > 16) { const cx = (bb[0] + bb[2]) / 2, cy = (bb[1] + bb[3]) / 2; bb = bboxAround({ lat: cy, lng: cx }, 7000); tiles = tilesFor(bb, z).slice(0, 16); }
+  const tpl = await tileTemplate(signal);
+  let fails = 0;
+  const lists = await Promise.all(tiles.map(([x, y]) => {
+    const k = z + '/' + x + '/' + y;
+    if (!tileMem.has(k)) {
+      const pr = fetchT(tpl.replace('{z}', z).replace('{x}', x).replace('{y}', y), {}, 10000, signal)
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+        .then(b => mvtDecode(b, x, y, z).map(tileItem).filter(Boolean));
+      tileMem.set(k, pr); pr.catch(() => tileMem.delete(k));
+      if (tileMem.size > 120) tileMem.delete(tileMem.keys().next().value);
+    }
+    return tileMem.get(k).catch(e => { if (e.name === 'AbortError') throw e; fails++; return []; });
+  }));
+  if (fails === tiles.length) { if (retry) { tileTpl = null; store.set('tiletpl', null); return tilePois(bb, signal, false); } throw new Error('tiles'); }
+  return lists.flat().filter(it => it.lng >= bb[0] && it.lng <= bb[2] && it.lat >= bb[1] && it.lat <= bb[3]).map(it => ({ ...it, tags: { ...it.tags } }));
+}
+
 async function fetchPlaces(parsed, area, signal, onPartial) {
   const center = area.type === 'around' ? { lat: area.lat, lng: area.lng } : { lat: (area.s + area.n) / 2, lng: (area.w + area.e) / 2 };
   const radius = Math.max(400, Math.min(6000, area.type === 'around' ? area.r : dist({ lat: area.s, lng: area.w }, { lat: area.n, lng: area.e }) / 2));
@@ -709,16 +872,39 @@ async function fetchPlaces(parsed, area, signal, onPartial) {
   const ck = parsed.rules.map(r => r.id).join(',') + '|' + parsed.unknown.join(',') + '|' + center.lat.toFixed(3) + ',' + center.lng.toFixed(3) + '|' + Math.round(radius / 200);
   const hit = resCache.get(ck); if (hit && Date.now() - hit.t < 15 * 60e3) return hit.items;
 
-  let items = null;
-  try { items = await photonSearch(parsed, center, radius, bb, signal); }
-  catch (e) { if (e.name === 'AbortError') throw e; }
-  if (items) {
-    if (onPartial) { const first = items.filter(it => keepItem(it, parsed)); if (first.length) onPartial(first); }
-    try { await enrich(items, signal); } catch (e) { if (e.name === 'AbortError') throw e; }
-    items = items.filter(it => keepItem(it, parsed));
+  const rules = parsed.rules.length || parsed.unknown.length ? parsed.rules : [RULES.find(r => r.id === 'sights')];
+  const want = new Set(photonTags(rules)); const keyOnly = new Set([...want].filter(x => !x.includes(':')));
+  const nameRe = parsed.unknown.length ? new RegExp(parsed.unknown.map(looseRe).join('.*'), 'i') : null;
+  const filterRule = rules.some(r => r.sel.some(sel => { const p = selParts(sel)[0]; return p && !PH_KEYS.includes(p.k); }));
+  const merged = new Map();
+  const add = list => { for (const it of list) { const ex = merged.get(it.id); if (!ex) merged.set(it.id, it); else { for (const k in it.tags) if (ex.tags[k] == null) ex.tags[k] = it.tags[k]; if (it.fromText) ex.fromText = true; if (it.rank != null && ex.rank == null) ex.rank = it.rank; } } };
+  const visible = () => [...merged.values()].filter(it => keepItem(it, parsed)).sort((a, b) => dist(center, a) - dist(center, b));
+  const emit = () => { if (onPartial) { const l = visible(); if (l.length) onPartial(l); } };
+  let ok = false;
+  const tileJob = tilePois(bb, signal).then(list => {
+    add(list.filter(it => {
+      const k = Object.keys(it.tags).find(x => x !== 'name'); const v = it.tags[k];
+      if (nameRe) return !!it.tags.name && nameRe.test(it.tags.name);
+      return want.has(k + ':' + v) || keyOnly.has(k);
+    }).map(it => (nameRe ? (it.fromText = true, it) : it)));
+    ok = true; emit();
+  });
+  const phJob = photonSearch(parsed, center, radius, bb, signal).then(list => { add(list); ok = true; emit(); });
+  const res = await Promise.allSettled([tileJob, phJob]);
+  if (signal.aborted || res.some(r => r.status === 'rejected' && r.reason?.name === 'AbortError')) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+
+  let items;
+  if (ok) {
+    const all = [...merged.values()].sort((a, b) => dist(center, a) - dist(center, b));
+    // szczegóły (kuchnia, godziny, ceny, Wikipedia) w paczkach po 50 – lista rośnie na bieżąco
+    const batches = filterRule ? 4 : 2;
+    for (let i = 0; i < batches && all.some(it => !it.enriched); i++) {
+      try { await enrich(all, signal); } catch (e) { if (e.name === 'AbortError') throw e; break; }
+      emit();
+    }
+    items = all.filter(it => keepItem(it, parsed));
   } else {
-    // zapas: Overpass (2 serwery naraz, kto pierwszy)
-    const data = await overpass(buildOverpass(parsed, area, 200), signal);
+    const data = await overpass(buildOverpass(parsed, area, 300), signal);
     items = (data.elements || []).map(el => ({ id: el.type + '/' + el.id, lat: el.lat ?? el.center?.lat, lng: el.lon ?? el.center?.lon, tags: el.tags || {} })).filter(x => x.lat != null);
   }
   resCache.set(ck, { t: Date.now(), items });
@@ -755,7 +941,7 @@ async function enrich(items, signal) {
   const ids = pick.map(it => ({ node: 'N', way: 'W', relation: 'R' }[it.id.split('/')[0]] + it.id.split('/')[1]));
   const j = await nomJSON(`${NOM}/lookup?format=jsonv2&osm_ids=${ids.join(',')}&extratags=1&addressdetails=1&namedetails=1&accept-language=pl`, signal);
   const byId = new Map((j || []).map(x => [x.osm_type + '/' + x.osm_id, x]));
-  for (const it of pick) { const x = byId.get(it.id); if (x) nominatimMerge(it, x); }
+  for (const it of pick) { const x = byId.get(it.id); if (x) nominatimMerge(it, x); else it.enriched = true; }
   return items;
 }
 /* zapasowy Overpass: wyścig 2 serwerów, limit czasu */
@@ -769,9 +955,9 @@ async function overpass(q, signal) {
 }
 
 /* ---------- kategorie (chipy) ---------- */
-const CHIPS = [['⭐ Atrakcje', 'atrakcje'], ['🍽️ Jedzenie', 'jedzenie'], ['🥙 Kebab', 'kebab'], ['🍕 Pizza', 'pizza'], ['☕ Kawa', 'kawa'], ['🍺 Bary', 'bar'], ['🍦 Lody', 'lody'], ['🏛️ Muzea', 'muzeum'], ['🏰 Zabytki', 'zabytki'], ['🌳 Parki', 'park'], ['🏊 Baseny', 'basen'], ['🎢 Rozrywka', 'rozrywka'], ['🔭 Widoki', 'punkt widokowy'], ['🏨 Noclegi', 'hotel'], ['🛍️ Zakupy', 'galeria handlowa'], ['🛒 Sklepy', 'sklep'], ['💊 Apteki', 'apteka'], ['🏧 Bankomaty', 'bankomat'], ['🚻 WC', 'toaleta']];
+const CHIPS = [['🗺️ Plan wycieczki', '__plan'], ['⭐ Atrakcje', 'atrakcje'], ['🍽️ Jedzenie', 'jedzenie'], ['🥙 Kebab', 'kebab'], ['🍕 Pizza', 'pizza'], ['☕ Kawa', 'kawa'], ['🍺 Bary', 'bar'], ['🍦 Lody', 'lody'], ['🏛️ Muzea', 'muzeum'], ['🏰 Zabytki', 'zabytki'], ['🌳 Parki', 'park'], ['🏊 Baseny', 'basen'], ['🎢 Rozrywka', 'rozrywka'], ['🔭 Widoki', 'punkt widokowy'], ['🏨 Noclegi', 'hotel'], ['🛍️ Zakupy', 'galeria handlowa'], ['🛒 Sklepy', 'sklep'], ['💊 Apteki', 'apteka'], ['🏧 Bankomaty', 'bankomat'], ['🚻 WC', 'toaleta']];
 $('#chips').innerHTML = CHIPS.map(([l, q]) => `<button class="chip" data-q="${esc(q)}">${l}</button>`).join('');
-$('#chips').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; $('#q').value = b.dataset.q; search(b.dataset.q); });
+$('#chips').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; if (b.dataset.q === '__plan') { openPlanner(); return; } $('#q').value = b.dataset.q; search(b.dataset.q); });
 function markChip(q) { document.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.q === norm(q).trim() || c.dataset.q === q)); }
 
 /* ---------- wyszukiwanie ---------- */
@@ -789,6 +975,7 @@ function currentArea(forceAround) {
 async function search(q, opts = {}) {
   q = (q || '').trim() || 'atrakcje';
   S.query = q; markChip(q); $('#areaBtn').hidden = true;
+  S.backTo = null; if (planCtrl) planCtrl.abort(); if (S.planShown) { routeLayer.clearLayers(); S.planShown = false; }
   const parsed = parseQuery(q);
   const around = opts.around || (parsed.near && S.user);
   const area = currentArea(around);
@@ -809,14 +996,14 @@ async function search(q, opts = {}) {
         if (!name && !/service|water|nature|fun/.test(cat.g)) continue;
         const key = (name || cat.l).toLowerCase() + '|' + lat.toFixed(3) + '|' + lng.toFixed(3);
         if (seen.has(key)) continue; seen.add(key);
-        const p = { id: el.id, lat, lng, tags: t, name: name || cat.l, cat };
+        const p = { id: el.id, lat, lng, tags: t, name: name || cat.l, cat, rank: el.rank };
         p.d = dist(area.ref, p);
         if (area.type === 'around' && p.d > area.r * 1.15) continue;
-        p.score = p.d / 1000 - (parsed.pop ? ((t.wikidata ? 2 : 0) + (t.wikipedia ? 1.5 : 0) + (t.image || t.wikimedia_commons ? .5 : 0) + (t.tourism === 'attraction' || t.tourism === 'museum' ? .4 : 0)) : 0);
+        p.score = p.d / 1000 - (parsed.pop ? ((t.wikidata ? 2 : 0) + (t.wikipedia ? 1.5 : 0) + (t.image || t.wikimedia_commons ? .5 : 0) + (t.tourism === 'attraction' || t.tourism === 'museum' ? .4 : 0) + (el.rank != null ? Math.max(0, 20 - el.rank) * .03 : 0)) : 0);
         out.push(p);
       }
       out.sort((a, b) => a.score - b.score);
-      return out.slice(0, 150);
+      return out.slice(0, 200);
     };
     const show = (list, final) => {
       if (ctrl !== S.ctrl) return;
@@ -978,7 +1165,7 @@ function openPlace(p) {
   const price = priceInfo(t); const off = offers(t);
   head(p.cat.e + ' ' + p.cat.l, fmtDist(p.d));
   $('#sheetBody').innerHTML = `
-    <button class="btn" id="backList" style="margin-bottom:10px;padding:8px 12px">← Wyniki</button>
+    <button class="btn" id="backList" style="margin-bottom:10px;padding:8px 12px">${S.backTo ? '← Plan' : '← Wyniki'}</button>
     <div class="hero" id="hero" style="--c:${p.cat.c}">${p.cat.e}</div>
     <h2 class="d-title">${esc(p.name)}</h2>
     <div class="d-type">${esc(p.cat.l)}${t.cuisine ? ' · ' + esc(cuisineTxt(t.cuisine)) : ''} · ${fmtDist(p.d)} stąd</div>
@@ -1002,7 +1189,7 @@ function openPlace(p) {
     <div class="sec"><a class="btn wide" href="${gmapsSearch(p)}" target="_blank" rel="noopener">📸 Zdjęcia, opinie i ceny w Google Maps ↗</a></div>
     <div class="src" id="srcs">Dane: OpenStreetMap</div>`;
   $('#sheetBody').scrollTop = 0;
-  $('#backList').onclick = () => renderList(parseQuery(S.query).label || `„${S.query}”`);
+  $('#backList').onclick = () => S.backTo ? S.backTo() : renderList(parseQuery(S.query).label || `„${S.query}”`);
   $('#routeBtn').onclick = () => planRoute(p);
   if (S.sheet !== 'full') setSheet('half');
   map.panTo([p.lat, p.lng], { animate: true });
@@ -1176,7 +1363,7 @@ $('#aroundBtn').onclick = () => { if (!S.user) { startWatch(); getPosOnce().then
 
 /* „szukaj w tym obszarze” po przesunięciu mapy */
 map.on('moveend', () => {
-  if (S.nav || !S.lastArea || S.route) return;
+  if (S.nav || !S.lastArea || S.route || S.planShown || S.backTo) return;
   const c = map.getCenter(); const ref = S.lastArea.type === 'around' ? S.lastArea : { lat: (S.lastArea.s + S.lastArea.n) / 2, lng: (S.lastArea.w + S.lastArea.e) / 2 };
   const b = map.getBounds(); const span = dist({ lat: b.getSouth(), lng: b.getWest() }, { lat: b.getNorth(), lng: b.getEast() });
   $('#areaBtn').hidden = dist(c, ref) < span * 0.25;
@@ -1258,6 +1445,124 @@ addEventListener('appinstalled', () => { installEvt = null; refreshInstall(); to
 $('#installBtn').onclick = e => { if (e.target.id === 'installX') { store.set('installHidden', true); refreshInstall(); return; } doInstall(); };
 $('#installSet').onclick = doInstall;
 refreshInstall();
+
+/* ---------- planer wycieczek ---------- */
+const PL = Object.assign({ h: 3, budget: 100, persons: 1, mode: 'foot', theme: 'mix' }, store.get('plan', {}));
+let plans = [], planCtrl = null, planSeed = 0;
+const fmtMin = m => m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ' ' + (m % 60) + ' min' : ''}`;
+function planStart() { const c = map.getCenter(); if (S.user && dist(S.user, c) < 25000) return { lat: S.user.lat, lng: S.user.lng, me: true }; return { lat: c.lat, lng: c.lng, me: false }; }
+function openPlanner() {
+  if (S.ctrl) S.ctrl.abort();
+  S.backTo = null; S.sel = null; S.lastArea = null; highlight(null); $('#areaBtn').hidden = true;
+  document.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.q === '__plan'));
+  head('🗺️ Plan wycieczki', ''); setSheet('full');
+  const seg = (k, opts) => `<div class="seg" data-k="${k}">${opts.map(([v, l]) => `<button data-v="${v}" class="${String(PL[k]) === String(v) ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+  const st = planStart();
+  $('#sheetBody').innerHTML = `<div class="pl">
+    <p class="note" style="margin-top:0">Podaj czas i budżet, a ułożę Ci plan wycieczki z atrakcjami i jedzeniem w okolicy.</p>
+    <label>Ile masz czasu?</label>${seg('h', [[1, '1 h'], [2, '2 h'], [3, '3 h'], [4, '4 h'], [6, '6 h'], [8, 'Cały dzień']])}
+    <label>Budżet łącznie</label><div class="pl-row"><input id="plBudget" type="number" inputmode="numeric" min="0" step="10" value="${PL.budget}"><b>zł</b></div>
+    ${seg('budget', [[0, 'Za darmo'], [50, '50 zł'], [100, '100 zł'], [200, '200 zł'], [400, '400 zł']])}
+    <label>Ile osób?</label><div class="stepper"><button data-pd="-1">−</button><b id="plP">${PL.persons}</b><button data-pd="1">+</button></div>
+    <label>Jak się poruszasz?</label>${seg('mode', [['foot', '🚶 Pieszo'], ['car', '🚗 Autem']])}
+    <label>Na co masz ochotę?</label>${seg('theme', [['mix', '✨ Wszystko po trochu'], ['kultura', '🏛️ Zabytki i muzea'], ['natura', '🌳 Natura i spacer'], ['rozrywka', '🎢 Rozrywka'], ['jedzenie', '🍽️ Jedzenie']])}
+    <p class="note">Start: ${st.me ? '📍 Twoja lokalizacja' : '🗺️ środek mapy' + (S.city?.name ? ' (' + esc(S.city.name) + ')' : '')}. Przesuń mapę, żeby zaplanować gdzie indziej.</p>
+    <button class="btn primary wide" id="plGo" style="margin:6px 0 10px">✨ Wymyśl plan</button></div>`;
+  $('#sheetBody').scrollTop = 0;
+  $('#sheetBody').querySelectorAll('.seg').forEach(g => g.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return; const k = g.dataset.k;
+    PL[k] = isNaN(+b.dataset.v) ? b.dataset.v : +b.dataset.v;
+    g.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+    if (k === 'budget') $('#plBudget').value = PL.budget; store.set('plan', PL);
+  }));
+  $('#plBudget').oninput = () => { PL.budget = Math.max(0, Math.round(+$('#plBudget').value || 0)); document.querySelectorAll('[data-k="budget"] button').forEach(x => x.classList.toggle('on', +x.dataset.v === PL.budget)); store.set('plan', PL); };
+  $('#sheetBody').querySelectorAll('[data-pd]').forEach(b => b.onclick = () => { PL.persons = Math.min(10, Math.max(1, PL.persons + +b.dataset.pd)); $('#plP').textContent = PL.persons; store.set('plan', PL); });
+  $('#plGo').onclick = () => { planSeed = 0; makePlans(); };
+}
+async function makePlans() {
+  if (planCtrl) planCtrl.abort(); const ctrl = planCtrl = new AbortController();
+  head('🗺️ Plan wycieczki', '', true);
+  $('#sheetBody').innerHTML = '<div class="empty">✨ Szukam najciekawszych miejsc i układam plan…</div>';
+  const start = planStart(), minutes = PL.h * 60;
+  const radius = PL.mode === 'car' ? Math.min(6000, 2500 + PL.h * 600) : Math.min(2600, 700 + PL.h * 350);
+  try {
+    let items = await tilePois(bboxAround(start, radius), ctrl.signal).catch(e => { if (e.name === 'AbortError') throw e; return []; });
+    if (!items.some(it => it.tags.name && planInfo(it.tags))) {
+      const pr = { rules: ['sights', 'museum', 'park', 'view', 'fun', 'food', 'cafe', 'icecream'].map(id => RULES.find(r => r.id === id)), unknown: [] };
+      items = await photonSearch(pr, start, radius, bboxAround(start, radius), ctrl.signal);
+    }
+    const pool = items.filter(it => it.tags.name && planInfo(it.tags));
+    const top = pool.filter(it => !planInfo(it.tags).food).sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99)).slice(0, 50);
+    try { await enrich(top, ctrl.signal); } catch (e) { if (e.name === 'AbortError') throw e; }
+    if (ctrl !== planCtrl) return;
+    const seen = new Set(), cands = [], foods = [];
+    for (const it of pool) {
+      const pi = planInfo(it.tags); if (!pi) continue;
+      const nm = it.tags['name:pl'] || it.tags.name, key = nm.toLowerCase(); if (seen.has(key)) continue; seen.add(key);
+      (pi.food ? foods : cands).push({ ...it, ...pi, name: nm, pop: planPop(it.tags, it.rank), cat: classify(it.tags), d: dist(start, it) });
+    }
+    const base = { minutes, budget: PL.budget, persons: PL.persons, mode: PL.mode, start, seed: planSeed };
+    const p1 = planTrip(cands, foods, { ...base, theme: PL.theme });
+    const avoid = new Set(p1.stops.slice(0, 2).map(x => x.id));
+    const p2 = planTrip(cands, foods, { ...base, theme: PL.theme, cheap: true, budget: Math.round(PL.budget * .4), avoid });
+    const alt = PL.theme === 'mix' ? (cands.some(c => c.theme === 'rozrywka') ? 'rozrywka' : 'natura') : 'mix';
+    const p3 = planTrip(cands, foods, { ...base, theme: alt, avoid: new Set([...avoid, ...p2.stops.slice(0, 1).map(x => x.id)]) });
+    const TT = { mix: '✨ Najciekawsze miejsca', kultura: '🏛️ Zabytki i muzea', natura: '🌳 Natura i spacer', rozrywka: '🎢 Rozrywka', jedzenie: '🍽️ Smaki okolicy' };
+    const sig = new Set();
+    plans = [{ ...p1, title: TT[PL.theme] }, { ...p2, title: PL.budget ? '💸 Oszczędnie' : '🆓 Za darmo – inna trasa' }, { ...p3, title: TT[alt] + (alt === PL.theme ? '' : ' – inny pomysł') }]
+      .filter(pl => { const k = pl.stops.map(x => x.id).join(); if (!pl.stops.length || sig.has(k)) return false; sig.add(k); return true; });
+    plans.start = start; renderPlans();
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    head('🗺️ Plan wycieczki', '');
+    $('#sheetBody').innerHTML = '<div class="empty">Nie udało się ułożyć planu (problem z internetem).<br><br><button class="btn brand" id="plRetry">Spróbuj ponownie</button> <button class="btn" id="plBack">← Ustawienia</button></div>';
+    $('#plRetry').onclick = makePlans; $('#plBack').onclick = openPlanner;
+  }
+}
+function planClock(min) { const d = new Date(Date.now() + (min + 5) * 60000); d.setMinutes(Math.floor(d.getMinutes() / 5) * 5, 0, 0); return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'); }
+const costTxt = (lo, hi) => hi === 0 ? 'za darmo' : lo === hi ? `≈ ${lo} zł` : `≈ ${lo}–${hi} zł`;
+function planGmaps(pl) {
+  const st = pl.stops, o = plans.start, last = st[st.length - 1], m = PL.mode === 'car' ? 'driving' : 'walking';
+  const wp = st.slice(0, -1).slice(0, 9).map(x => x.lat.toFixed(6) + ',' + x.lng.toFixed(6)).join('|');
+  return `https://www.google.com/maps/dir/?api=1&origin=${o.lat.toFixed(6)},${o.lng.toFixed(6)}&destination=${last.lat.toFixed(6)},${last.lng.toFixed(6)}${wp ? '&waypoints=' + encodeURIComponent(wp) : ''}&travelmode=${m}`;
+}
+function renderPlans() {
+  S.backTo = renderPlans; S.route = null;
+  head('🗺️ Twoje plany', `${PL.h === 8 ? 'cały dzień' : PL.h + ' h'} · ${PL.budget} zł`);
+  if (!plans.length) { routeLayer.clearLayers(); layer.clearLayers(); $('#sheetBody').innerHTML = '<div class="empty">Za mało ciekawych miejsc w okolicy, żeby ułożyć plan 😕<br>Przesuń mapę bliżej centrum miasta albo wybierz „Autem” i więcej czasu.<br><br><button class="btn" id="plBack">← Zmień ustawienia</button></div>'; $('#plBack').onclick = openPlanner; return; }
+  const mv = PL.mode === 'car' ? '🚗' : '🚶';
+  $('#sheetBody').innerHTML = plans.map((pl, i) => `<div class="plan">
+      <div class="plan-h"><b>${esc(pl.title)}</b><span>⏱️ ${fmtMin(pl.minutes)} · 💵 ${costTxt(pl.lo, pl.hi)}${PL.persons > 1 ? ' (' + PL.persons + ' os.)' : ''} · ${pl.stops.length} miejsc</span></div>
+      <ol class="tl">${pl.stops.map((st, j) => `<li data-pl="${i}" data-st="${j}"><span class="tm">${planClock(st.at)}</span><span class="ic" style="--c:${st.cat.c}">${st.cat.e}</span><div><b>${j + 1}. ${esc(st.name)}</b><small>${esc(st.cat.l)} · ${fmtMin(st.dur)} · ${st.hi === 0 ? 'za darmo' : (st.lo === st.hi ? st.lo : st.lo + '–' + st.hi) + ' zł/os.'}<br>${mv} ${fmtMin(st.travel)} ${PL.mode === 'car' ? 'jazdy' : 'dojścia'}</small></div></li>`).join('')}</ol>
+      ${!pl.stops.some(x => x.food) && PL.h >= 3 ? '<p class="note">🥪 W tym planie nie ma posiłku – weź coś do jedzenia.</p>' : ''}
+      <div class="actions"><button class="btn primary" data-show="${i}">🗺️ Pokaż trasę</button><a class="btn" href="${planGmaps(pl)}" target="_blank" rel="noopener">Google Maps ↗</a></div></div>`).join('')
+    + '<div class="actions"><button class="btn wide" id="plMore">🔄 Wymyśl inne plany</button></div><div class="actions" style="margin-top:0"><button class="btn wide" id="plBack">⚙️ Zmień czas lub budżet</button></div>'
+    + `<p class="src">Ceny i czasy są szacunkowe (typowe ceny w Polsce${S.country !== 'pl' ? ', za granicą mogą być inne' : ''}). Przed wyjściem sprawdź godziny otwarcia.</p>`;
+  $('#plMore').onclick = () => { planSeed = (planSeed || 0) + 1.7; makePlans(); };
+  $('#plBack').onclick = openPlanner;
+  $('#sheetBody').querySelectorAll('[data-show]').forEach(b => b.onclick = () => showPlan(+b.dataset.show));
+  $('#sheetBody').querySelectorAll('[data-st]').forEach(li => li.onclick = () => openPlace(plans[+li.dataset.pl].stops[+li.dataset.st]));
+  if (!S.planShown) showPlanMarkers(0);
+}
+function showPlanMarkers(i) {
+  layer.clearLayers(); markers.clear();
+  const pl = plans[i]; if (!pl) return; S.places = pl.stops;
+  pl.stops.forEach((st, j) => L.marker([st.lat, st.lng], { icon: L.divIcon({ className: '', html: `<div class="pin num" style="--c:${st.cat.c}"><span>${j + 1}</span></div>`, iconSize: [34, 34], iconAnchor: [5, 34] }), zIndexOffset: 500 }).on('click', () => openPlace(st)).addTo(layer));
+}
+async function showPlan(i) {
+  const pl = plans[i]; showPlanMarkers(i); S.planShown = true;
+  const pts = [plans.start, ...pl.stops];
+  setSheet('half');
+  map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lng])), sheetPad());
+  const card = $('#sheetBody').querySelectorAll('.plan')[i]; if (card) card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  routeLayer.clearLayers();
+  try {
+    const j = await getJSON(`${ROUTERS[PL.mode === 'car' ? 'car' : 'foot'][0]}${pts.map(p => p.lng.toFixed(6) + ',' + p.lat.toFixed(6)).join(';')}?overview=full&geometries=geojson`, {}, 10000);
+    const ll = j.routes[0].geometry.coordinates.map(([a, b]) => [b, a]);
+    L.polyline(ll, { color: '#fff', weight: 9, opacity: .9, lineCap: 'round', lineJoin: 'round' }).addTo(routeLayer);
+    L.polyline(ll, { color: '#7c3aed', weight: 5, opacity: .95, lineCap: 'round', lineJoin: 'round', dashArray: PL.mode === 'foot' ? '2 9' : null }).addTo(routeLayer);
+  } catch { L.polyline(pts.map(p => [p.lat, p.lng]), { color: '#7c3aed', weight: 4, dashArray: '6 8' }).addTo(routeLayer); }
+}
 
 /* ---------- przycisk „Wstecz” (aplikacja Android) ---------- */
 window.__odkBack = () => {
