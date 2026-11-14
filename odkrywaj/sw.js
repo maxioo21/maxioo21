@@ -1,8 +1,10 @@
 // Odkrywaj – service worker: aplikacja otwiera się szybko i działa jak natywna.
-const CACHE = 'odkrywaj-v1';
+const CACHE = 'odkrywaj-v2';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './privacy.html',
   './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/favicon-48.png',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css', 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'];
+  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css', 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+  'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css', 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js',
+  'https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => Promise.all(SHELL.map(u => c.add(u).catch(() => {})))).then(() => self.skipWaiting()));
 });

@@ -41,7 +41,7 @@ android {
     // Strona aplikacji z folderu /odkrywaj trafia do środka APK
     sourceSets {
         main {
-            assets.srcDirs = ['../../odkrywaj']
+            assets.srcDirs = [System.getenv('WEB_DIR') ?: '../../odkrywaj']
         }
     }
 }

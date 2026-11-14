@@ -1,18 +1,21 @@
-name: Test serwerów (diagnostyka)
+name: Test aplikacji na żywo
 on:
   push:
     branches: [main]
-    paths: ['tools/test-api.mjs', '.github/workflows/test-api.yml']
+    paths: ['tools/**', '.github/workflows/test-api.yml', 'odkrywaj/**']
   workflow_dispatch:
 jobs:
-  test:
+  e2e:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
-      - run: node tools/test-api.mjs
-      - run: |
-          for p in maplibre-gl@4 @maplibre/maplibre-gl-leaflet leaflet@1.9.4; do npm view "$p" version name | tail -2; done
-          cd /tmp && npm pack @maplibre/maplibre-gl-leaflet --silent && tar -tzf maplibre-maplibre-gl-leaflet-*.tgz | head -20
+      - run: npm i --no-save playwright-core@1 >/dev/null 2>&1
+      - run: (python3 -m http.server 8080 >/dev/null 2>&1 &) && sleep 1 && node tools/e2e.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zrzuty
+          path: '*.png'

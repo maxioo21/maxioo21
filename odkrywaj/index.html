@@ -12,7 +12,12 @@
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin>
+<link rel="preconnect" href="https://photon.komoot.io" crossorigin>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -544,7 +549,70 @@ function stepText(st) {
     default: return m.modifier === 'uturn' ? `Zawróć${on}` : (!m.modifier || m.modifier === 'straight') ? `Jedź prosto${on}` : `Skręć ${mod}${on}`;
   }
 }
-if (typeof module !== 'undefined') module.exports = { parseQuery, buildOverpass, classify, offers, priceInfo, hoursTxt, genDesc, stepText, fmtDist, fmtTime, dist, distToLine, looseRe, RULES };
+
+/* ---- szybkie wyszukiwanie: Photon + Nominatim (filtry w składni Overpass sprawdzane lokalnie) ---- */
+const PH_KEYS = ['amenity','shop','tourism','leisure','historic','natural','railway','public_transport','office','craft'];
+const FOOD_TAGS = ['amenity:restaurant','amenity:fast_food','amenity:cafe','amenity:food_court','amenity:ice_cream','amenity:bar','amenity:pub','shop:bakery','shop:pastry'];
+const SPORT_TAGS = ['leisure:sports_centre','leisure:pitch','leisure:fitness_centre','leisure:track','leisure:ice_rink','leisure:sports_hall','leisure:amusement_arcade'];
+function selParts(sel) { return [...sel.matchAll(/\["([^"]+)"(?:(=|~|!~)"([^"]*)"(,i)?)?\]/g)].map(m => ({ k: m[1], op: m[2] || '', v: m[3] || '', i: !!m[4] })); }
+function matchSel(sel, t) {
+  const parts = selParts(sel); if (!parts.length) return false;
+  return parts.every(p => {
+    const v = t[p.k];
+    if (!p.op) return v != null && v !== '';
+    if (p.op === '=') return v === p.v;
+    let re; try { re = new RegExp(p.v, p.i ? 'i' : ''); } catch { return true; }
+    if (p.op === '~') return v != null && re.test(v);
+    return v == null || !re.test(v);
+  });
+}
+function photonTags(rules) {
+  const set = new Set();
+  for (const r of rules) for (const sel of r.sel) {
+    const p = selParts(sel)[0]; if (!p) continue;
+    if (PH_KEYS.includes(p.k)) {
+      if (!p.op) set.add(p.k);
+      else if (p.op === '=') set.add(p.k + ':' + p.v);
+      else if (p.op === '~') p.v.replace(/^\^\(/, '').replace(/\)\$$/, '').split('|').forEach(v => set.add(p.k + ':' + v));
+    } else if (/^(cuisine|diet)/.test(p.k)) FOOD_TAGS.forEach(x => set.add(x));
+    else if (p.k === 'sport') SPORT_TAGS.forEach(x => set.add(x));
+  }
+  return [...set];
+}
+/* słowa do wyszukiwania po nazwie (np. „kebab”, „pizz”) wyciągnięte z filtrów name~ */
+function nameTerms(rules) {
+  const out = new Set();
+  for (const r of rules) for (const sel of r.sel) for (const p of selParts(sel)) if (p.k === 'name' && p.op === '~') out.add(p.v.split('|')[0]);
+  return [...out].slice(0, 3);
+}
+function photonToItem(f) {
+  const pr = f.properties || {}; const ty = { N: 'node', W: 'way', R: 'relation' }[pr.osm_type];
+  if (!ty || !f.geometry) return null;
+  const t = {}; if (pr.osm_key && pr.osm_value) t[pr.osm_key] = pr.osm_value;
+  if (pr.name) t.name = pr.name;
+  if (pr.street) t['addr:street'] = pr.street; if (pr.housenumber) t['addr:housenumber'] = pr.housenumber;
+  if (pr.city || pr.locality) t['addr:city'] = pr.city || pr.locality; if (pr.postcode) t['addr:postcode'] = pr.postcode;
+  return { id: ty + '/' + pr.osm_id, lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], tags: t };
+}
+function nominatimMerge(it, x) {
+  const t = it.tags, a = x.address || {};
+  Object.assign(t, x.extratags || {});
+  if (x.category && x.type && x.type !== 'yes') t[x.category] = x.type;
+  if (x.name && !t.name) t.name = x.name;
+  const nd = x.namedetails || {}; if (nd['name:pl']) t['name:pl'] = nd['name:pl'];
+  if (a.road && !t['addr:street']) t['addr:street'] = a.road;
+  if (a.house_number && !t['addr:housenumber']) t['addr:housenumber'] = a.house_number;
+  const city = a.city || a.town || a.village; if (city && !t['addr:city']) t['addr:city'] = city;
+  if (a.postcode && !t['addr:postcode']) t['addr:postcode'] = a.postcode;
+  it.enriched = true; return it;
+}
+function keepItem(it, parsed) {
+  if (!parsed.rules.length) return true;          // szukanie po nazwie – zostaw wszystko
+  if (it.fromText && !it.enriched) return true;   // trafienie po nazwie, bez szczegółów
+  return parsed.rules.some(r => r.sel.some(sel => matchSel(sel, it.tags)));
+}
+
+if (typeof module !== 'undefined') module.exports = { selParts, matchSel, photonTags, nameTerms, photonToItem, nominatimMerge, keepItem, parseQuery, buildOverpass, classify, offers, priceInfo, hoursTxt, genDesc, stepText, fmtDist, fmtTime, dist, distToLine, looseRe, RULES };
 </script>
 
 <!-- ======================= APLIKACJA ======================= -->
@@ -559,7 +627,20 @@ const S = { country: store.get('country', 'pl'), city: store.get('city', null), 
 /* ---------- mapa ---------- */
 if (!window.L) { document.body.innerHTML = '<p style="padding:30px;font-family:sans-serif">Brak internetu — nie można wczytać mapy. Spróbuj ponownie.</p>'; return; }
 const map = L.map('map', { zoomControl: false, attributionControl: true, tap: true }).setView([52.1, 19.4], 6);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 20, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · © <a href="https://carto.com/attributions">CARTO</a>' }).addTo(map);
+/* Podkład mapy: OpenFreeMap (wektorowa, jak Google Maps – drogi, ulice, budynki), bez klucza.
+   Gdy telefon nie obsługuje WebGL – zwykłe kafelki OpenStreetMap. */
+function webglOK() { try { const c = document.createElement('canvas'); return !!(c.getContext('webgl2') || c.getContext('webgl')); } catch { return false; } }
+const OSM_ATTR = '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank">OpenMapTiles</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>';
+let baseLayer = null;
+function rasterBase() { if (baseLayer) map.removeLayer(baseLayer); baseLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(map); }
+if (window.maplibregl && L.maplibreGL && webglOK()) {
+  try {
+    baseLayer = L.maplibreGL({ style: 'https://tiles.openfreemap.org/styles/liberty', attribution: OSM_ATTR, interactive: false }).addTo(map);
+    const gl = baseLayer.getMaplibreMap && baseLayer.getMaplibreMap();
+    if (gl) gl.on('error', e => { if (!S.glOk && /style|Failed to fetch/i.test(String(e?.error?.message || ''))) { S.glFail = (S.glFail || 0) + 1; if (S.glFail > 3) rasterBase(); } });
+    if (gl) gl.once('load', () => { S.glOk = true; });
+  } catch { rasterBase(); }
+} else rasterBase();
 const layer = L.layerGroup().addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
 let meMarker = null, meCircle = null; const markers = new Map();
@@ -595,17 +676,92 @@ function sheetPad() { return desktop() ? { paddingTopLeft: [440, 40], paddingBot
 let toastT; function toast(msg, ms = 3200) { const t = $('#toast'); t.textContent = msg; t.hidden = false; t.style.opacity = 1; clearTimeout(toastT); toastT = setTimeout(() => { t.style.opacity = 0; setTimeout(() => t.hidden = true, 300); }, ms); }
 
 /* ---------- sieć ---------- */
-async function getJSON(url, opt = {}) { const r = await fetch(url, opt); if (!r.ok) throw new Error(r.status); return r.json(); }
+/* fetch z limitem czasu (nic już nie „wisi” w nieskończoność) */
+function fetchT(url, opt = {}, ms = 10000, signal) {
+  const c = new AbortController(); const to = setTimeout(() => c.abort(), ms);
+  const onAbort = () => c.abort(); if (signal) { if (signal.aborted) c.abort(); else signal.addEventListener('abort', onAbort, { once: true }); }
+  return fetch(url, { ...opt, signal: c.signal }).finally(() => { clearTimeout(to); signal && signal.removeEventListener('abort', onAbort); })
+    .catch(e => { if (signal && signal.aborted) { const a = new Error('aborted'); a.name = 'AbortError'; throw a; } throw e; });
+}
+async function getJSON(url, opt = {}, ms = 10000) { const r = await fetchT(url, opt, ms, opt.signal); if (!r.ok) throw new Error(r.status); return r.json(); }
+const NOM = 'https://nominatim.openstreetmap.org';
+const PHOTON = 'https://photon.komoot.io';
+/* Nominatim: max 1 zapytanie na sekundę (zasady serwera) */
+let nomNext = 0;
+async function nomJSON(url, signal, ms = 8000) {
+  const wait = Math.max(0, nomNext - Date.now()); nomNext = Date.now() + wait + 1100;
+  if (wait) await new Promise(r => setTimeout(r, wait));
+  return getJSON(url, { signal }, ms);
+}
+/* pamięć wyników – ten sam obszar i zapytanie pokażą się od razu */
+const resCache = new Map();
+function bboxAround(c, r) { const dLat = r / 111320, dLng = r / (111320 * Math.cos(c.lat * Math.PI / 180)); return [c.lng - dLng, c.lat - dLat, c.lng + dLng, c.lat + dLat]; }
+
+async function fetchPlaces(parsed, area, signal, onPartial) {
+  const center = area.type === 'around' ? { lat: area.lat, lng: area.lng } : { lat: (area.s + area.n) / 2, lng: (area.w + area.e) / 2 };
+  const radius = Math.max(400, Math.min(6000, area.type === 'around' ? area.r : dist({ lat: area.s, lng: area.w }, { lat: area.n, lng: area.e }) / 2));
+  const bb = area.type === 'bbox' ? [area.w, area.s, area.e, area.n] : bboxAround(center, radius);
+  const ck = parsed.rules.map(r => r.id).join(',') + '|' + parsed.unknown.join(',') + '|' + center.lat.toFixed(3) + ',' + center.lng.toFixed(3) + '|' + Math.round(radius / 200);
+  const hit = resCache.get(ck); if (hit && Date.now() - hit.t < 15 * 60e3) return hit.items;
+
+  let items = null;
+  try { items = await photonSearch(parsed, center, radius, bb, signal); }
+  catch (e) { if (e.name === 'AbortError') throw e; }
+  if (items) {
+    if (onPartial) { const first = items.filter(it => keepItem(it, parsed)); if (first.length) onPartial(first); }
+    try { await enrich(items, signal); } catch (e) { if (e.name === 'AbortError') throw e; }
+    items = items.filter(it => keepItem(it, parsed));
+  } else {
+    // zapas: Overpass (2 serwery naraz, kto pierwszy)
+    const data = await overpass(buildOverpass(parsed, area, 200), signal);
+    items = (data.elements || []).map(el => ({ id: el.type + '/' + el.id, lat: el.lat ?? el.center?.lat, lng: el.lon ?? el.center?.lon, tags: el.tags || {} })).filter(x => x.lat != null);
+  }
+  resCache.set(ck, { t: Date.now(), items });
+  return items;
+}
+async function photonSearch(parsed, center, radius, bb, signal) {
+  let rules = parsed.rules;
+  if (!rules.length && !parsed.unknown.length) rules = [RULES.find(r => r.id === 'sights')];
+  const tags = photonTags(rules);
+  const jobs = [];
+  const km = (radius / 1000).toFixed(2);
+  for (let i = 0; i < tags.length; i += 30) {
+    const qs = tags.slice(i, i + 30).map(t => 'osm_tag=' + encodeURIComponent(t)).join('&');
+    jobs.push(getJSON(`${PHOTON}/reverse?lat=${center.lat.toFixed(5)}&lon=${center.lng.toFixed(5)}&radius=${km}&limit=50&${qs}`, { signal }, 9000).then(j => (j.features || []).map(photonToItem)));
+  }
+  const terms = [...parsed.unknown.length ? [parsed.unknown.join(' ')] : [], ...nameTerms(rules)];
+  for (const q of terms) {
+    jobs.push(getJSON(`${PHOTON}/api/?q=${encodeURIComponent(q)}&lat=${center.lat.toFixed(5)}&lon=${center.lng.toFixed(5)}&bbox=${bb.map(x => x.toFixed(5)).join(',')}&limit=40`, { signal }, 9000)
+      .then(j => (j.features || []).filter(f => !/^(place|boundary|highway|landuse|waterway|railway)$/.test(f.properties?.osm_key) || f.properties?.osm_value === 'station').map(photonToItem).filter(Boolean).map(it => (it.fromText = true, it))));
+  }
+  const res = await Promise.allSettled(jobs);
+  if (res.some(r => r.status === 'rejected' && r.reason?.name === 'AbortError')) { const a = new Error('aborted'); a.name = 'AbortError'; throw a; }
+  if (res.every(r => r.status === 'rejected')) throw new Error('photon');
+  const seen = new Map();
+  for (const r of res) if (r.status === 'fulfilled') for (const it of r.value) if (it && !seen.has(it.id)) seen.set(it.id, it);
+  const items = [...seen.values()];
+  items.forEach(it => it._d = dist(center, it)); items.sort((a, b) => a._d - b._d);
+  return items;
+}
+/* szczegóły (kuchnia, godziny, WWW, ceny, Wikipedia) dla max 50 najbliższych miejsc jednym zapytaniem */
+async function enrich(items, signal) {
+  const pick = items.filter(it => !it.enriched).slice(0, 50);
+  if (!pick.length) return items;
+  const ids = pick.map(it => ({ node: 'N', way: 'W', relation: 'R' }[it.id.split('/')[0]] + it.id.split('/')[1]));
+  const j = await nomJSON(`${NOM}/lookup?format=jsonv2&osm_ids=${ids.join(',')}&extratags=1&addressdetails=1&namedetails=1&accept-language=pl`, signal);
+  const byId = new Map((j || []).map(x => [x.osm_type + '/' + x.osm_id, x]));
+  for (const it of pick) { const x = byId.get(it.id); if (x) nominatimMerge(it, x); }
+  return items;
+}
+/* zapasowy Overpass: wyścig 2 serwerów, limit czasu */
 const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 async function overpass(q, signal) {
-  let lastErr;
-  for (const url of OVERPASS) {
-    try { return await getJSON(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal }); }
-    catch (e) { if (e.name === 'AbortError') throw e; lastErr = e; }
-  }
-  throw lastErr || new Error('overpass');
+  const one = url => getJSON(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal }, 12000)
+    .then(j => { if (!(j.elements || []).length && /error|timed out/i.test(j.remark || '')) throw new Error('remark'); return j; });
+  try { return await Promise.any(OVERPASS.slice(0, 2).map(one)); }
+  catch (e) { if (signal && signal.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' }); }
+  return Promise.any(OVERPASS.slice(2).map(one)).catch(() => { throw new Error('overpass'); });
 }
-const NOM = 'https://nominatim.openstreetmap.org';
 
 /* ---------- kategorie (chipy) ---------- */
 const CHIPS = [['⭐ Atrakcje', 'atrakcje'], ['🍽️ Jedzenie', 'jedzenie'], ['🥙 Kebab', 'kebab'], ['🍕 Pizza', 'pizza'], ['☕ Kawa', 'kawa'], ['🍺 Bary', 'bar'], ['🍦 Lody', 'lody'], ['🏛️ Muzea', 'muzeum'], ['🏰 Zabytki', 'zabytki'], ['🌳 Parki', 'park'], ['🏊 Baseny', 'basen'], ['🎢 Rozrywka', 'rozrywka'], ['🔭 Widoki', 'punkt widokowy'], ['🏨 Noclegi', 'hotel'], ['🛍️ Zakupy', 'galeria handlowa'], ['🛒 Sklepy', 'sklep'], ['💊 Apteki', 'apteka'], ['🏧 Bankomaty', 'bankomat'], ['🚻 WC', 'toaleta']];
@@ -637,31 +793,42 @@ async function search(q, opts = {}) {
   const label = parsed.label || (parsed.unknown.length ? `„${q}”` : 'Atrakcje');
   showListLoading(label);
   try {
-    const data = await overpass(buildOverpass(parsed, area), ctrl.signal);
+    let shown = false;
+    const build = found => {
+      const seen = new Set(); const out = [];
+      for (const el of found) {
+        const lat = el.lat, lng = el.lng; const t = el.tags || {};
+        if (lat == null) continue;
+        const cat = classify(t);
+        const name = t['name:pl'] || t.name || t.brand || '';
+        if (!name && !/service|water|nature|fun/.test(cat.g)) continue;
+        const key = (name || cat.l).toLowerCase() + '|' + lat.toFixed(3) + '|' + lng.toFixed(3);
+        if (seen.has(key)) continue; seen.add(key);
+        const p = { id: el.id, lat, lng, tags: t, name: name || cat.l, cat };
+        p.d = dist(area.ref, p);
+        if (area.type === 'around' && p.d > area.r * 1.15) continue;
+        p.score = p.d / 1000 - (parsed.pop ? ((t.wikidata ? 2 : 0) + (t.wikipedia ? 1.5 : 0) + (t.image || t.wikimedia_commons ? .5 : 0) + (t.tourism === 'attraction' || t.tourism === 'museum' ? .4 : 0)) : 0);
+        out.push(p);
+      }
+      out.sort((a, b) => a.score - b.score);
+      return out.slice(0, 150);
+    };
+    const show = (list, final) => {
+      if (ctrl !== S.ctrl) return;
+      const sel = S.sel && S.places.includes(S.sel) ? S.sel : null;
+      S.places = list; renderMarkers();
+      if (sel) { const same = list.find(x => x.id === sel.id); if (same) { Object.assign(sel.tags, same.tags); S.places[S.places.indexOf(same)] = sel; } highlight(sel); }
+      else renderList(label, !final);
+      if (!shown && around && list.length) map.fitBounds(L.latLngBounds(list.slice(0, 25).map(p => [p.lat, p.lng]).concat([[area.ref.lat, area.ref.lng]])), { ...sheetPad(), maxZoom: 16 });
+      shown = true;
+    };
+    const found = await fetchPlaces(parsed, area, ctrl.signal, part => show(build(part), false));
     if (ctrl !== S.ctrl) return;
-    const seen = new Set(); const out = [];
-    for (const el of data.elements || []) {
-      const lat = el.lat ?? el.center?.lat, lng = el.lon ?? el.center?.lon; const t = el.tags || {};
-      if (lat == null) continue;
-      const cat = classify(t);
-      const name = t['name:pl'] || t.name || t.brand || '';
-      if (!name && !/service|water|nature|fun/.test(cat.g)) continue;
-      const key = (name || cat.l).toLowerCase() + '|' + lat.toFixed(3) + '|' + lng.toFixed(3);
-      if (seen.has(key)) continue; seen.add(key);
-      const p = { id: el.type + '/' + el.id, lat, lng, tags: t, name: name || cat.l, cat };
-      p.d = dist(area.ref, p);
-      if (area.type === 'around' && p.d > area.r * 1.15) continue;
-      p.score = p.d / 1000 - (parsed.pop ? ((t.wikidata ? 2 : 0) + (t.wikipedia ? 1.5 : 0) + (t.image || t.wikimedia_commons ? .5 : 0) + (t.tourism === 'attraction' || t.tourism === 'museum' ? .4 : 0)) : 0);
-      out.push(p);
-    }
-    out.sort((a, b) => a.score - b.score);
-    S.places = out.slice(0, 150);
-    renderMarkers(); renderList(label);
-    if (around && S.places.length) map.fitBounds(L.latLngBounds(S.places.slice(0, 25).map(p => [p.lat, p.lng]).concat([[area.ref.lat, area.ref.lng]])), { ...sheetPad(), maxZoom: 16 });
+    show(build(found), true);
     if (S.sheet === 'peek' && S.places.length) setSheet('half');
   } catch (e) {
     if (e.name === 'AbortError') return;
-    renderError('Nie udało się pobrać miejsc (serwer map jest przeciążony albo brak internetu). Spróbuj za chwilę.');
+    renderError('Nie udało się pobrać miejsc. Sprawdź internet i spróbuj ponownie.');
   }
 }
 
@@ -690,10 +857,10 @@ function miniTags(p) {
   if (t.wheelchair === 'yes') a.push('<span class="mt">♿</span>');
   return a.slice(0, 4).join('');
 }
-function renderList(label) {
+function renderList(label, loadingMore) {
   S.sel = null; highlight(null);
-  head(label, S.places.length ? `${S.places.length} miejsc` : '');
-  if (!S.places.length) { $('#sheetBody').innerHTML = `<div class="empty">Nic nie znalazłem w tym obszarze 🤷<br>Odsuń mapę (pokaż większy obszar) albo wpisz coś innego — np. nazwę lokalu.</div>`; return; }
+  head(label, S.places.length ? `${S.places.length} miejsc` : '', loadingMore);
+  if (!S.places.length) { if (loadingMore) { $('#sheetBody').innerHTML = '<div class="empty">Szukam w okolicy…</div>'; return; } $('#sheetBody').innerHTML = `<div class="empty">Nic nie znalazłem w tym obszarze 🤷<br>Odsuń mapę (pokaż większy obszar) albo wpisz coś innego — np. nazwę lokalu.</div>`; return; }
   $('#sheetBody').innerHTML = S.places.map((p, i) => `
     <div class="card" data-i="${i}">
       <div class="thumb soft" style="--c:${p.cat.c}" data-thumb="${i}">${p.cat.e}</div>
@@ -993,8 +1160,8 @@ async function onFirstFix() {
   map.setView([S.user.lat, S.user.lng], 15);
   search(S.query || 'atrakcje', { around: true });
   try {
-    const j = await getJSON(`${NOM}/reverse?format=jsonv2&lat=${S.user.lat}&lon=${S.user.lng}&zoom=10&accept-language=pl&addressdetails=1`);
-    const a = j.address || {}; const name = a.city || a.town || a.village || a.municipality || a.county || '';
+    const j = await getJSON(`${PHOTON}/reverse?lat=${S.user.lat.toFixed(5)}&lon=${S.user.lng.toFixed(5)}&limit=1&osm_tag=place`, {}, 8000);
+    const pr = j.features?.[0]?.properties || {}; const a = { country_code: (pr.countrycode || '').toLowerCase() }; const name = pr.city || (/city|town|village/.test(pr.osm_value) ? pr.name : '') || pr.county || '';
     if (a.country_code) { S.country = a.country_code; store.set('country', S.country); }
     S.city = { name, lat: S.user.lat, lng: S.user.lng, fixed: false }; store.set('city', S.city); setPill();
   } catch {}
@@ -1031,8 +1198,8 @@ async function citySearch(qOverride) {
   $('#citySug').innerHTML = '<div class="empty" style="padding:10px"><div class="spin" style="margin:auto"></div></div>';
   try {
     const cc = $('#country').value;
-    let j = await getJSON(`${NOM}/search?format=jsonv2&q=${encodeURIComponent(q)}&countrycodes=${cc}&featureType=settlement&addressdetails=1&limit=8&accept-language=pl`, { signal: cityCtrl.signal });
-    if (!j.length) j = await getJSON(`${NOM}/search?format=jsonv2&q=${encodeURIComponent(q)}&countrycodes=${cc}&addressdetails=1&limit=8&accept-language=pl`, { signal: cityCtrl.signal });
+    let j = await nomJSON(`${NOM}/search?format=jsonv2&q=${encodeURIComponent(q)}&countrycodes=${cc}&featureType=settlement&addressdetails=1&limit=8&accept-language=pl`, cityCtrl.signal);
+    if (!j.length) j = await nomJSON(`${NOM}/search?format=jsonv2&q=${encodeURIComponent(q)}&countrycodes=${cc}&addressdetails=1&limit=8&accept-language=pl`, cityCtrl.signal);
     citySug = j.map(r => ({ name: r.name || r.display_name.split(',')[0], sub: [r.address?.state, r.address?.county].filter(Boolean)[0] || '', lat: +r.lat, lng: +r.lon, bb: r.boundingbox.map(Number), cc: r.address?.country_code || cc }));
     $('#citySug').innerHTML = citySug.length ? citySug.map((c, i) => `<button data-sug="${i}">🏙️ ${esc(c.name)}<small>${esc(c.sub)}</small></button>`).join('') : '<p class="note">Nie znaleziono takiego miasta w wybranym kraju.</p>';
     return citySug;

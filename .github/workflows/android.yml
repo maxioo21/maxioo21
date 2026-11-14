@@ -63,6 +63,22 @@ jobs:
           echo "SIGNING_STORE_FILE=$HOME/.odk-signing/release.jks" >> "$GITHUB_ENV"
           echo "SIGNING_STORE_PASSWORD=$(cat ~/.odk-signing/pass)" >> "$GITHUB_ENV"
 
+      # Biblioteki mapy wbudowane w aplikację – nie pobierają się przy każdym uruchomieniu
+      - name: Wbuduj biblioteki mapy w aplikację
+        run: |
+          rm -rf "$RUNNER_TEMP/www" && cp -r odkrywaj "$RUNNER_TEMP/www" && mkdir -p "$RUNNER_TEMP/www/lib"
+          cd "$RUNNER_TEMP" && mkdir -p pk && cd pk
+          npm pack leaflet@1.9.4 maplibre-gl@4.7.1 @maplibre/maplibre-gl-leaflet@0.1.4 --silent
+          for f in *.tgz; do mkdir -p "x-$f" && tar -xzf "$f" -C "x-$f"; done
+          L="$RUNNER_TEMP/www/lib"
+          cp x-leaflet-1.9.4.tgz/package/dist/leaflet.js x-leaflet-1.9.4.tgz/package/dist/leaflet.css "$L/"
+          cp x-maplibre-gl-4.7.1.tgz/package/dist/maplibre-gl.js x-maplibre-gl-4.7.1.tgz/package/dist/maplibre-gl.css "$L/"
+          cp x-maplibre-maplibre-gl-leaflet-0.1.4.tgz/package/leaflet-maplibre-gl.js "$L/"
+          W="$RUNNER_TEMP/www/index.html"
+          sed -i 's#https://unpkg.com/leaflet@1.9.4/dist/#lib/#g; s#https://unpkg.com/maplibre-gl@4.7.1/dist/#lib/#g; s#https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/#lib/#g' "$W"
+          ls -la "$L"; ! grep -n "unpkg.com" "$W"
+          echo "WEB_DIR=$RUNNER_TEMP/www" >> "$GITHUB_ENV"
+
       - name: Budowanie APK
         working-directory: android
         env:
