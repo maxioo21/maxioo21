@@ -51,6 +51,9 @@ a{color:var(--brand)}
 .fab.on{background:var(--nav);color:#fff}
 .area-btn{position:fixed;z-index:640;left:50%;transform:translateX(-50%);top:calc(var(--top-h) + 14px);border:0;background:#fff;border-radius:999px;padding:9px 16px;font-weight:700;font-size:13.5px;box-shadow:0 4px 16px rgba(20,20,30,.18)}
 [hidden]{display:none!important}
+.install{position:fixed;z-index:645;left:50%;transform:translateX(-50%);top:calc(var(--top-h) + 14px);border:0;background:var(--brand);color:#fff;border-radius:999px;padding:10px 16px;font-weight:800;font-size:14px;box-shadow:0 6px 20px rgba(15,118,110,.4);display:flex;gap:8px;align-items:center;white-space:nowrap}
+.install small{font-weight:600;opacity:.85}
+.install .x{margin-left:4px;opacity:.8;font-size:13px}
 
 /* ---------- sheet ---------- */
 .sheet{position:fixed;z-index:680;left:0;right:0;bottom:0;height:calc(var(--sheet-h) + var(--safe-b));background:var(--card);border-radius:24px 24px 0 0;box-shadow:0 -10px 34px rgba(20,20,30,.16);display:flex;flex-direction:column;transition:height .28s ease;padding-bottom:var(--safe-b)}
@@ -122,7 +125,7 @@ a{color:var(--brand)}
 .nav-bottom .eta{flex:1}
 .nav-bottom .eta b{font-size:20px;color:#17803d}
 .nav-bottom .eta div{color:var(--muted);font-size:13px;font-weight:650}
-body.navigating .top,body.navigating .sheet,body.navigating .area-btn{display:none}
+body.navigating .top,body.navigating .sheet,body.navigating .area-btn,body.navigating .install{display:none}
 body.navigating .fabs{bottom:calc(96px + var(--safe-b))}
 
 /* markers */
@@ -178,6 +181,7 @@ body.navigating .fabs{bottom:calc(96px + var(--safe-b))}
   <div class="chips" id="chips"></div>
 </div>
 
+<button class="install" id="installBtn" hidden>📲 Zainstaluj na telefonie <span class="x" id="installX" aria-label="Zamknij">✕</span></button>
 <button class="area-btn" id="areaBtn" hidden>🔄 Szukaj w tym obszarze</button>
 
 <div class="fabs">
@@ -217,6 +221,8 @@ body.navigating .fabs{bottom:calc(96px + var(--safe-b))}
 <div class="modal" id="setModal" hidden>
   <div class="m-card">
     <div class="m-head"><b>Ustawienia</b><button class="icon-btn" data-close>✕</button></div>
+    <button class="btn brand wide" id="installSet">📲 Zainstaluj na telefonie</button>
+    <p class="note" id="installHint"></p>
     <label for="gkey">Klucz Google Maps API (opcjonalnie)</label>
     <input id="gkey" placeholder="AIza…" autocomplete="off">
     <p class="note">Bez klucza aplikacja działa w pełni na darmowych danych OpenStreetMap i Wikipedii. Z kluczem Google (Maps JavaScript API + Places API (New)) w szczegółach miejsca pojawią się dodatkowo <b>zdjęcia z Google Maps, oceny gwiazdkowe i poziom cen</b>. Klucz zostaje tylko w tej przeglądarce.</p>
@@ -1055,6 +1061,31 @@ document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', e =
 $('#openSettings').onclick = () => { $('#gkey').value = S.gKey; $('#setModal').hidden = false; };
 $('#saveKey').onclick = () => { S.gKey = $('#gkey').value.trim(); store.set('gkey', S.gKey); gReady = null; $('#setModal').hidden = true; toast(S.gKey ? 'Zapisano klucz Google — zdjęcia i ceny pojawią się w szczegółach miejsc.' : 'Zapisano.'); };
 $('#clearKey').onclick = () => { S.gKey = ''; store.set('gkey', ''); $('#gkey').value = ''; toast('Usunięto klucz.'); };
+
+/* ---------- instalacja na telefonie (PWA) ---------- */
+const inAndroidApp = location.hostname === 'appassets.androidplatform.net';
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+let installEvt = null;
+function refreshInstall() {
+  const can = !inAndroidApp && !standalone();
+  $('#installBtn').hidden = !(can && installEvt && !store.get('installHidden', false));
+  $('#installSet').hidden = !can;
+  $('#installHint').textContent = !can ? '' : installEvt ? 'Ikona Odkrywaj pojawi się na ekranie głównym telefonu.'
+    : isIOS ? 'iPhone: w Safari dotknij „Udostępnij” (kwadrat ze strzałką) → „Do ekranu początkowego”.'
+    : 'Android: w Chrome otwórz menu ⋮ → „Zainstaluj aplikację” (albo „Dodaj do ekranu głównego”). Plik APK: github.com/maxioo21/maxioo21/raw/main/pobierz/Odkrywaj.apk';
+}
+async function doInstall() {
+  if (!installEvt) { $('#setModal').hidden = false; refreshInstall(); return; }
+  installEvt.prompt();
+  try { await installEvt.userChoice; } catch {}
+  installEvt = null; refreshInstall();
+}
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; refreshInstall(); });
+addEventListener('appinstalled', () => { installEvt = null; refreshInstall(); toast('Zainstalowano! Ikona Odkrywaj jest na ekranie głównym 🎉'); });
+$('#installBtn').onclick = e => { if (e.target.id === 'installX') { store.set('installHidden', true); refreshInstall(); return; } doInstall(); };
+$('#installSet').onclick = doInstall;
+refreshInstall();
 
 /* ---------- przycisk „Wstecz” (aplikacja Android) ---------- */
 window.__odkBack = () => {
