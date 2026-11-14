@@ -31,4 +31,10 @@ await page.click('#routeBtn'); await page.waitForTimeout(3000);
 console.log('trasa:', await page.textContent('#sheetBody .r-sum').catch(() => 'brak'));
 await page.screenshot({ path: 'shot-route.png' });
 console.log('błędy JS:', errs.length ? errs : 'brak', '| łącznie', ms());
+for (const f of ['shot-start.png', 'shot-kebab.png', 'shot-route.png']) {
+  const p2 = await b.newPage(); await p2.setViewportSize({ width: 400, height: 860 });
+  await p2.setContent(`<img src="data:image/png;base64,${(await import('fs')).readFileSync(f).toString('base64')}" style="width:400px">`);
+  const jpg = await p2.screenshot({ type: 'jpeg', quality: 60 });
+  console.log(`IMG ${f} ` + jpg.toString('base64')); await p2.close();
+}
 await b.close();
